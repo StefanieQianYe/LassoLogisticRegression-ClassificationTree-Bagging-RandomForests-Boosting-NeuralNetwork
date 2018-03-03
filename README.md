@@ -11,8 +11,8 @@ The obtained training and test misclassification rates show that,
 
 3) In addition, Lasso Logistic Regression performs variable selection by shrinking some coefficients to zero. From the solution path, it is found that the top 5 predictors are follows. 
 
-V4: Jitter..F0_PQ5_classical_Baken
-V110: X12th.delta
-V37: Shimmer..Ampl_PQ5_classical_Baken
-V103: X5th.delta
-V42: Shimmer..Ampl_abs0th_perturb
+V4: Jitter..F0_PQ5_classical_Baken,
+V110: X12th.delta,
+V37: Shimmer..Ampl_PQ5_classical_Baken,
+V103: X5th.delta,
+V42: Shimmer..Ampl_abs0th_perturb.
