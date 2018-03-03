@@ -1,5 +1,5 @@
 # LassoLogisticRegression-ClassificationTree-Bagging-RandomForests-Boosting-NeuralNetwork
-The rehabilitation data set contains 1 binary response variable (acceptable vs unacceptable phonation during rehabilitation) and 310 real-valued predictors. The aim is to use the 310 features to predict the binary response, and identify the top 5 predictors. 
+The data set (rehabilitation_Qian.csv) contains 1 binary response variable (acceptable vs unacceptable phonation during rehabilitation) and 310 real-valued predictors. The aim is to use the 310 features to predict the binary response, and identify the top 5 predictors. 
 
 To solve this problem, I implement and compare six classification methods – Lasso Logistic Regression, Classification Tree, Bagging, Random Forests, Boosting, and Neural Networks – in terms of training and test misclassification errors. I split the dataset randomly into half training and half test data before model fitting, and this procedure is repeated multiple times to obtain a stable result of misclassification rates. 
 
