@@ -1,0 +1,259 @@
+###############################
+#  the "rehabilitation" data  #
+###############################
+#variables 1-310 are predictors, variable 311 is response
+#the response variable "BinaryClass": "Yes"=acceptable, "No"=unacceptable
+
+setwd("D:/Work_Sample") #set work path
+
+#load the "rehabilitation" data into R
+RehaData = read.csv(file="rehabilitation_Qian.csv")
+names(RehaData) #look at all variable names
+
+#libraries needed
+library(MASS)
+library(tree)
+library(randomForest)
+library(gbm)
+library(neuralnet)
+library(glmnet)
+
+#---------------------------------------------------------------------
+# Lasso LR, Trees, Bagging, Random Forests, Boosting, and Neural Nets 
+#---------------------------------------------------------------------
+set.seed(2)
+errmat = matrix(0,20,12) #repeat splitting data multiple times for stable results
+for(i in 1:20)
+{
+  train=sample(1:nrow(RehaData), nrow(RehaData)/2)
+  RehaData.test=RehaData[-train,]
+  BinaryClass.test=RehaData$BinaryClass[-train]
+  BinaryClass.tr = RehaData$BinaryClass[train]
+  
+  #---------------------------------------------------------------
+  # Regularized logistic regression (with Lasso regularization)
+  #---------------------------------------------------------------
+  train.X = as.matrix(RehaData[train,c(-311)])
+  test.X = as.matrix(RehaData[-train,c(-311)])
+  train.Y = as.numeric(RehaData[train,c(311)])
+  test.Y = as.numeric(RehaData[-train,c(311)])
+  rlr.cvfit = cv.glmnet(x=train.X, y=train.Y, family="binomial", alpha=1, type.measure = "class")
+  # predicted values using lasso
+  rlr.trpred = predict(rlr.cvfit, newx = train.X, s = "lambda.1se", type="class")
+  rlr.tspred = predict(rlr.cvfit, newx = test.X, s = "lambda.1se", type="class")
+  # misclassification rate
+  rlr.trmis=mean(rlr.trpred != (as.numeric(RehaData[train,]$BinaryClass))) 
+  rlr.tsmis=mean(rlr.tspred != (as.numeric(RehaData[-train,]$BinaryClass))) 
+  rlr.err = c(rlr.trmis, rlr.tsmis)
+  #-----------------------------------------------------------
+  # Trees
+  #-----------------------------------------------------------
+  tree.RehaData=tree(BinaryClass~.,RehaData,subset=train)
+  cv.RehaData=cv.tree(tree.RehaData,FUN=prune.misclass)
+  prune.RehaData=prune.misclass(tree.RehaData,best=2)
+  tree.trpred=predict(prune.RehaData,type="class")
+  tree.tspred=predict(prune.RehaData,RehaData.test,type="class")
+  tree.trerr = mean(BinaryClass.tr!=tree.trpred)
+  tree.tserr = mean(BinaryClass.test!=tree.tspred)
+  tree.err = c(tree.trerr, tree.tserr)
+  #-------------------------------------------------------------------
+  # Bagging
+  #-------------------------------------------------------------------
+  bag.RehaData=randomForest(BinaryClass~.,data=RehaData,subset=train, mtry=310)
+  bag.trpred=predict(bag.RehaData,type="class")
+  bag.tspred=predict(bag.RehaData,RehaData.test,type="class")
+  bag.trerr =mean(BinaryClass.tr!=bag.trpred)
+  bag.tserr =mean(BinaryClass.test!=bag.tspred)
+  bag.err = c(bag.trerr, bag.tserr)
+  #-------------------------------------------------------------------
+  # Random Forests
+  #-------------------------------------------------------------------
+  rf.RehaData=randomForest(BinaryClass~.,data=RehaData,subset=train, mtry=18)
+  rf.trpred=predict(rf.RehaData,type="class")
+  rf.tspred=predict(rf.RehaData,RehaData.test,type="class")
+  rf.trerr =mean(BinaryClass.tr!=rf.trpred)
+  rf.tserr =mean(BinaryClass.test!=rf.tspred)
+  rf.err = c(rf.trerr, rf.tserr)
+  #-------------------------------------------------------------------
+  # Boosting
+  #-------------------------------------------------------------------
+  y = as.numeric(RehaData$BinaryClass[train])-1
+  RehaData.tr = data.frame(y,RehaData[train,-311])
+  bs.RehaData=gbm(y~.,data=RehaData.tr,distribution="bernoulli", n.trees=900,interaction.depth=10)
+  bs.trpred=(predict(bs.RehaData,n.trees=900,type="response")) > 0.5
+  bs.tspred= (predict(bs.RehaData,n.trees=900,RehaData.test,type="response")) > 0.5
+  bs.trerr = mean((as.numeric(BinaryClass.tr)-1)!=bs.trpred)
+  bs.tserr = mean((as.numeric(BinaryClass.test)-1)!=bs.tspred)
+  bs.err = c(bs.trerr, bs.tserr)
+  #-------------------------------------------------------------------
+  # Neural Nets (one hidden layer)--has to be numeric (Yes/No-->1/0)
+  #-------------------------------------------------------------------
+  #convert response Yes/No to numeric, since this package seems only work for numeric response. but tree package seems not work on numeric response.
+  BinaryClass=as.numeric(RehaData$BinaryClass)-1 #convert response to 0,1
+  predictor=RehaData[,-311]
+  nn.data=cbind(predictor,BinaryClass)
+  # Standardize the data
+  std.RehaData=as.data.frame(scale(predictor,center=TRUE,scale=TRUE))
+  std.nn.data=as.data.frame(cbind(std.RehaData,BinaryClass))
+  std.train=std.nn.data[train,]
+  std.test=std.nn.data[-train,]
+  #below two lines are writing the model fomula, since this package doesn't take "y~."
+  n = names(std.train)
+  f = as.formula(paste("BinaryClass ~",paste(n[!n %in% "BinaryClass"],collapse=' + '))) # create the model formula
+  #now fit the model
+  nn.fit=neuralnet(f,data= std.RehaData,hidden=3,linear.output=FALSE) #linear.output=FALSE is for classification problem; otherwise, if response is quantitative, set it to TRUE. #hidden: a vector of integers specifying the number of hidden neurons (vertices) in each layer.
+  #predicted values
+  predtr.nn = compute(nn.fit,std.train[,1:310])$net.result # train data
+  std.train.BinaryClass = (std.train$BinaryClass)
+  predts.nn = compute(nn.fit,std.test[,1:310])$net.result # test data
+  std.test.BinaryClass = (std.test$BinaryClass)
+  #convert quantitative results into categorical results: if >0.5 we assign it to be 1, if <0.5, we assign it to be 0
+  predtr.nn[predtr.nn[,1]<0.5] = 0  #if <0.5 we assign it to be 0
+  predtr.nn[predtr.nn[,1]>0.5] = 1  #if >0.5 we assign it to be 1
+  predtr.nn #for train data
+  predts.nn[predts.nn[,1]<0.5] = 0  #if <0.5 we assign it to be 0
+  predts.nn[predts.nn[,1]>0.5] = 1  #if >0.5 we assign it to be 1
+  predts.nn #for test data
+  #comparison between observed and predicted
+  nn.train.results=cbind(predtr.nn,std.train.BinaryClass) #train data
+  nn.test.results=cbind(predts.nn,std.test.BinaryClass) #test data
+  #misclassification error rate
+  nn.trerr = mean(std.train.BinaryClass!=predtr.nn)
+  nn.tserr = mean(std.test.BinaryClass!=predts.nn)
+  nn.err = c(nn.trerr, nn.tserr)
+
+  errmat[i,] = c(rlr.err,tree.err,bag.err,rf.err,bs.err,nn.err) 
+}
+
+# plots
+labels = as.factor(c(rep("LRLTr",20),rep("LRLTs",20),rep("TreeTr",20),rep("TreeTs",20),
+                  rep("BagTr",20),rep("BagTs",20),rep("RFTr",20),rep("RFTs",20),
+                     rep("BSTr",20),rep("BSTs",20),rep("NNTr",20),rep("NNTs",20)))
+err = c(errmat)
+err
+boxplot(err~labels,ylab="misclassification rate")
+
+
+###############################
+#  the "rehabilitation" data  #
+###############################
+#variables 1-310 are predictors, variable 311 is response
+#the response variable "BinaryClass": "Yes"=acceptable, "No"=unacceptable
+
+setwd("D:/Work_Sample") #set work path
+
+#load the "rehabilitation" data into R
+RehaData = read.csv(file="rehabilitation_Qian.csv")
+names(RehaData) #look at all variable names
+
+#--------------------------------------------
+# Fitting Classification Trees
+#--------------------------------------------
+library(MASS)
+library(tree)
+
+#---------------------------------------------------------------------
+# First, fit tree using the most complecated tree provided in this package
+#---------------------------------------------------------------------
+tree.RehaData=tree(BinaryClass~.,RehaData) #fit a Classification tree
+summary(tree.RehaData) #the resulted tree size is 8
+plot(tree.RehaData) #plot the classification tree
+text(tree.RehaData,pretty=0) #mark variable on the classification tree
+tree.RehaData #solution details
+
+# Split data into half training and half test data
+set.seed(2)
+train=sample(1:nrow(RehaData), nrow(RehaData)/2) #take half of data as training data
+RehaData.test=RehaData[-train,] #take the other half of data as test data
+# Look at test error 
+BinaryClass.test=RehaData$BinaryClass[-train]
+tree.RehaData=tree(BinaryClass~.,RehaData,subset=train) #fit tree using training data
+tree.pred=predict(tree.RehaData,RehaData.test,type="class") #predict class of test data
+                                                            #note: type="class" or "probability"-specify the type of predictions needed.
+conf.mat = table(tree.pred,BinaryClass.test) #compare prediction with true value of test data
+conf.mat #confusion matrix
+corr.clas = (conf.mat[1,1] + conf.mat[2,2] )/sum(conf.mat)
+corr.clas #percentage correctly classified
+1-corr.clas #percentage misclassified
+
+#--------------------------------------------------------------
+# Now, consider if Pruning improves the misclassication rate
+#--------------------------------------------------------------
+set.seed(2)
+cv.RehaData=cv.tree(tree.RehaData,FUN=prune.misclass)
+names(cv.RehaData)
+cv.RehaData #look for the smallest dev in results
+
+par(mfrow=c(1,2))
+plot(cv.RehaData$size,cv.RehaData$dev,type="b",xlab="size",ylab="Mis-Classification")#size is number of nodes, dev is number of observations misclassified
+plot(cv.RehaData$k,cv.RehaData$dev,type="b",xlab="alpha",ylab="Mis-Classification")#k is the tuning parameter alpha (smaller alpha leads to more complex model)
+
+dev.off()
+prune.RehaData=prune.misclass(tree.RehaData,best=2)#the best is the one with least number of misclassified observations (with the smallest dev)
+prune.RehaData
+plot(prune.RehaData) #plot the pruned tree
+text(prune.RehaData,pretty=0)
+
+prune.tree.pred=predict(prune.RehaData,RehaData.test,type="class")
+prune.conf.mat = table(prune.tree.pred,BinaryClass.test)
+prune.conf.mat #confusion matrix after pruning
+prune.corr.clas = (prune.conf.mat[1,1] + prune.conf.mat[2,2] )/sum(prune.conf.mat)
+prune.corr.clas
+1-prune.corr.clas #percentage misclassified after pruning
+
+# Compare confusion matrix and percentage misclassification before and after pruning
+conf.mat #confusion matrix
+prune.conf.mat #confusion matrix after pruning
+1-corr.clas #percentage misclassified
+1-prune.corr.clas #percentage misclassified after pruning
+
+
+###############################
+#  the "rehabilitation" data  #
+###############################
+#variables 1-310 are predictors, variable 311 is response
+#the response variable "BinaryClass": "Yes"=acceptable, "No"=unacceptable
+
+setwd("D:/Work_Sample") #set work path
+
+#load the "rehabilitation" data into R
+RehaData = read.csv(file="rehabilitation_Qian.csv")
+names(RehaData) #look at all variable names
+
+library(glmnet)
+
+set.seed(2)
+train=sample(1:nrow(RehaData),nrow(RehaData)/2)
+RehaData.test=RehaData[-train,]
+BinaryClass.test=RehaData$BinaryClass[-train]
+BinaryClass.tr = RehaData$BinaryClass[train]
+
+#---------------------------------------------------------------------
+# Regularized logistic regression (with Lasso regularization)
+#---------------------------------------------------------------------
+train.X = as.matrix(RehaData[train,c(-311)])
+test.X = as.matrix(RehaData[-train,c(-311)])
+train.Y = as.numeric(RehaData[train,c(311)])
+test.Y = as.numeric(RehaData[-train,c(311)])
+
+rlr.fit = glmnet(x=train.X,y=train.Y,family="binomial",alpha=1) # alpha=1 yields lasso penalty, and alpha=0 yields ridge penalty.
+plot(rlr.fit,col=1:310,xvar = "lambda",label=TRUE) #only variable 4 is important which is "Jitter..F0_PQ5_classical_Baken"
+plot(rlr.fit,col=1:310,xvar = "lambda",label=TRUE,ylim=c(-400, 100)) #take a closer look, can see more important variables
+
+# cross-validation errors
+rlr.cvfit = cv.glmnet(x=train.X,y=train.Y,family="binomial",alpha=1,type.measure = "class")
+plot(rlr.cvfit)
+
+# view the selected lambda (lambda min or lambda 1se)
+#rlr.cvfit$lambda.min
+rlr.cvfit$lambda.1se
+
+# predicted values using lasso
+rlr.trpred = predict(rlr.cvfit, newx = train.X, s = "lambda.1se",type="class")
+rlr.tspred = predict(rlr.cvfit, newx = test.X, s = "lambda.1se",type="class")
+
+# misclassification rate
+rlr.trmis=mean(rlr.trpred != (as.numeric(RehaData[train,]$BinaryClass))) 
+rlr.tsmis=mean(rlr.tspred != (as.numeric(RehaData[-train,]$BinaryClass))) 
+rlr.err = c(rlr.trmis, rlr.tsmis)
+rlr.err
